@@ -154,7 +154,7 @@ def alloc_policy_output_tensors(cfg, env_info: EnvInfo, rnn_size, device, share,
     policy_outputs = policy_output_shapes(num_actions, num_action_distribution_parameters)
     policy_outputs += [("new_rnn_states", [rnn_size])]
     if cfg.core_memory:
-         policy_outputs += [("agent_new_memory", [1 * core_hidden_size])] # to distinguish old and new agent memory
+        policy_outputs += [("agent_new_memory", [1 * core_hidden_size])] # to distinguish old and new agent memory
         policy_outputs += [("new_global_memory", [num_agents * core_hidden_size])] # havent changed so can be owerwritten
     if cfg.attn_core:
         policy_outputs += [("new_history_seq", [rollout * core_hidden_size])] # updates to last rollout observations 

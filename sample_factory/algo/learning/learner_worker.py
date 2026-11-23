@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import nullcontext
 from threading import Thread
 from typing import Dict, Optional
 
@@ -147,10 +148,13 @@ class LearnerWorker(HeartbeatStoppableEventLoopObject, Configurable):
         log.debug(f"{self.object_id} finished initialization!")
 
     def on_new_training_batch(self, batch_idx: int):
-        if self.cfg.use_rnn != True:
-            with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-                stats = self.learner.train(self.batcher.training_batches[batch_idx])
-        else:
+        amp_context = nullcontext()
+        device = self.learner.device
+        if not self.cfg.use_rnn and device.type == "cuda":
+            with torch.cuda.device(device):
+                if torch.cuda.get_device_capability()[0] >= 8 and torch.cuda.is_bf16_supported():
+                    amp_context = torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+        with amp_context:
             stats = self.learner.train(self.batcher.training_batches[batch_idx])
 
         self.training_iteration_since_resume += 1
