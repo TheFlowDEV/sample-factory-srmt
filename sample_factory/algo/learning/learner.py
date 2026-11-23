@@ -226,9 +226,7 @@ class Learner(Configurable):
         self.actor_critic.train()
 
         params = list(self.actor_critic.parameters())
-        if getattr(self.cfg, 'core_memory', False) and getattr(self.cfg, 'mem_recurrence', -1) != -1:                  
-            params.append(self.actor_critic.core.initial_agent_memory)
-        
+
         optimizer_cls = dict(adam=torch.optim.Adam, lamb=Lamb)
         if self.cfg.optimizer not in optimizer_cls:
             raise RuntimeError(f"Unknown optimizer {self.cfg.optimizer}")
