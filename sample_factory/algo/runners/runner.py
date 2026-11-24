@@ -480,20 +480,26 @@ class Runner(EventLoopObject, Configurable):
         if len(self.env_steps) < self.cfg.num_policies:
             return
 
-        metric = self.cfg.save_best_metric # .split(', ')
-        #for metric in metrics:
-        #print(f"runner self.policy_avg_stats = {self.policy_avg_stats}")
-        if metric in self.policy_avg_stats:
-            for policy_id in range(self.cfg.num_policies):
-                # check if number of samples collected is greater than cfg.save_best_after
-                env_steps = self.env_steps[policy_id]
-                if env_steps < self.cfg.save_best_after:
-                    continue
+        metric = self.cfg.save_best_metric
+        for policy_id in range(self.cfg.num_policies):
+            if self.env_steps[policy_id] < self.cfg.save_best_after:
+                continue
 
+            if metric == "CSR_then_makespan":
+                if "CSR" not in self.policy_avg_stats or "makespan" not in self.policy_avg_stats:
+                    continue
+                successes = self.policy_avg_stats["CSR"][policy_id]
+                makespans = self.policy_avg_stats["makespan"][policy_id]
+                if len(successes) != len(makespans):
+                    continue
+                successful_makespans = [steps for success, steps in zip(successes, makespans) if success == 1.0]
+                if successful_makespans:
+                    score = (float(np.mean(successes)), -float(np.mean(successful_makespans)))
+                    self.save_best.emit(policy_id, metric, score)
+            elif metric in self.policy_avg_stats:
                 stats = self.policy_avg_stats[metric][policy_id]
-                if len(stats) > 0:
-                    avg_metric = np.mean(stats)
-                    self.save_best.emit(policy_id, metric, avg_metric)
+                if stats:
+                    self.save_best.emit(policy_id, metric, np.mean(stats))
 
     @staticmethod
     def _register_msg_handler(handlers_dict, key, func):

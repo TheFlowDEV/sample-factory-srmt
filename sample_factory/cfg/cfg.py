@@ -485,7 +485,7 @@ def add_rl_args(p: ArgumentParser):
     p.add_argument(
         "--save_best_metric",
         default="reward",
-        help='Save "best" policies based on this metric (just env reward by default)',
+        help='Save "best" policies by this metric. CSR_then_makespan maximizes CSR, then minimizes successful makespan.',
     )
     p.add_argument(
         "--save_best_after",

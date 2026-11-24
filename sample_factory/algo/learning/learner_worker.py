@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from contextlib import nullcontext
 from threading import Thread
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple, Union
 
 import psutil
 import torch
@@ -110,7 +110,7 @@ class LearnerWorker(HeartbeatStoppableEventLoopObject, Configurable):
             return True
         return False
 
-    def save_best(self, policy_id: PolicyID, metric: str, metric_value: float) -> bool:
+    def save_best(self, policy_id: PolicyID, metric: str, metric_value: Union[float, Tuple[float, float]]) -> bool:
         if self.learner.save_best(policy_id, metric, metric_value):
             self.saved_model.emit(self.learner.policy_id)
             return True

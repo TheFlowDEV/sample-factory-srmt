@@ -287,7 +287,9 @@ class Learner(Configurable):
         if load_progress:
             self.train_step = checkpoint_dict["train_step"]
             self.env_steps = checkpoint_dict["env_steps"]
-            self.best_performance = checkpoint_dict.get("best_performance", self.best_performance)
+            saved_metric = checkpoint_dict.get("best_metric", self.cfg.save_best_metric)
+            if saved_metric == self.cfg.save_best_metric:
+                self.best_performance = checkpoint_dict.get("best_performance", self.best_performance)
         self.actor_critic.load_state_dict(checkpoint_dict["model"])
         self.optimizer.load_state_dict(checkpoint_dict["optimizer"])
         self.curr_lr = checkpoint_dict.get("curr_lr", self.cfg.learning_rate)
@@ -305,6 +307,15 @@ class Learner(Configurable):
 
             self._load_state(checkpoint_dict, load_progress=load_progress)
 
+        if load_progress and name_prefix == "checkpoint" and self.cfg.save_best_metric == "CSR_then_makespan":
+            # The best checkpoint can be newer than the most recent periodic checkpoint.
+            best_checkpoints = self.get_checkpoints(self.checkpoint_dir(self.cfg, policy_id), pattern="best_*.pth")
+            best_checkpoint = self.load_checkpoint(best_checkpoints, "cpu") if best_checkpoints else None
+            if best_checkpoint is not None and best_checkpoint.get("best_metric") == self.cfg.save_best_metric:
+                score = best_checkpoint["best_performance"]
+                if not isinstance(self.best_performance, tuple) or score > self.best_performance:
+                    self.best_performance = score
+
     def _should_save_summaries(self):
         summaries_every_seconds = self.summary_rate_decay_seconds.at(self.train_step)
         if time.time() - self.last_summary_time < summaries_every_seconds:
@@ -320,6 +331,7 @@ class Learner(Configurable):
         checkpoint = {
             "train_step": self.train_step,
             "env_steps": self.env_steps,
+            "best_metric": self.cfg.save_best_metric,
             "best_performance": self.best_performance,
             "model": self.actor_critic.state_dict(),
             "optimizer": self.optimizer.state_dict(),
@@ -342,10 +354,11 @@ class Learner(Configurable):
             log.info("Saving %s...", filepath)
 
         torch.save(checkpoint, tmp_filepath)
-        os.rename(tmp_filepath, filepath)
+        os.replace(tmp_filepath, filepath)
 
         while len(checkpoints := self.get_checkpoints(checkpoint_dir, f"{name_prefix}_*")) > keep_checkpoints:
-            oldest_checkpoint = checkpoints[0]
+            # A resumed run can improve the score before it reaches the previous best's training step.
+            oldest_checkpoint = checkpoints[1] if name_prefix == "best" and checkpoints[0] == filepath else checkpoints[0]
             if os.path.isfile(oldest_checkpoint):
                 if verbose:
                     log.debug("Removing %s", oldest_checkpoint)
@@ -368,16 +381,24 @@ class Learner(Configurable):
         torch.save(checkpoint, milestone_path)
 
     def save_best(self, policy_id, metric, metric_value) -> bool:
-        if policy_id != self.policy_id:
+        if policy_id != self.policy_id or not self.is_initialized:
             return False
-        p = 3  # precision, number of significant digits
-        if metric_value - self.best_performance > 1 / 10**p:
-            log.info(f"Saving new best policy, {metric}={metric_value:.{p}f}!")
-            self.best_performance = metric_value
-            name_suffix = f"_{metric}_{metric_value:.{p}f}"
-            return self._save_impl("best", name_suffix, 1, verbose=True)
 
-        return False
+        if isinstance(metric_value, tuple):
+            if isinstance(self.best_performance, tuple) and metric_value <= self.best_performance:
+                return False
+            csr, negative_makespan = metric_value
+            log.info("Saving new best policy, CSR=%.3f, successful makespan=%.3f!", csr, -negative_makespan)
+            name_suffix = f"_CSR_{csr:.3f}_makespan_{-negative_makespan:.3f}"
+        else:
+            improvement = metric_value - self.best_performance
+            if not improvement > 0.001:
+                return False
+            log.info("Saving new best policy, %s=%.3f!", metric, metric_value)
+            name_suffix = f"_{metric}_{metric_value:.3f}"
+
+        self.best_performance = metric_value
+        return self._save_impl("best", name_suffix, 1, verbose=True)
 
     def set_new_cfg(self, new_cfg: Dict) -> None:
         self.new_cfg = new_cfg
