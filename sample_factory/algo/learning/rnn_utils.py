@@ -169,19 +169,20 @@ def build_srmt_inputs(head_outputs, history, env_agent_buffer_rollout_info,
     is_new_episode = device(is_new_episode)
 
     head_outputs_seq = PackedSequence(head_outputs.index_select(0, select_inds), batch_sizes, sorted_indices)
-    history_seq = PackedSequence(history.index_select(0, select_inds), batch_sizes, sorted_indices)
     env_agent_buffer_rollout_info_seq = PackedSequence(env_agent_buffer_rollout_info.index_select(0, select_inds), batch_sizes, sorted_indices)
+    is_same_episode = (1 - is_new_episode.view(-1, 1)).index_select(0, rollout_starts)
 
+    start_history = None
+    if history is not None:
+        start_history = history.index_select(0, rollout_starts) * is_same_episode
     if agent_memory is not None:
         agent_memory = agent_memory.index_select(0, rollout_starts)
-        is_same_episode = (1 - is_new_episode.view(-1, 1)).index_select(0, rollout_starts)
         agent_memory = agent_memory * is_same_episode
     if global_memory is not None:
         global_memory = global_memory.index_select(0, rollout_starts)
-        is_same_episode = (1 - is_new_episode.view(-1, 1)).index_select(0, rollout_starts)
         global_memory = global_memory * is_same_episode
     
     if return_lengths:
-        return head_outputs_seq, history_seq, env_agent_buffer_rollout_info_seq, agent_memory, global_memory, inverted_select_inds, cpu_lengths
+        return head_outputs_seq, start_history, env_agent_buffer_rollout_info_seq, agent_memory, global_memory, inverted_select_inds, cpu_lengths
     else:
-        return head_outputs_seq, history_seq, env_agent_buffer_rollout_info_seq, agent_memory, global_memory, inverted_select_inds
+        return head_outputs_seq, start_history, env_agent_buffer_rollout_info_seq, agent_memory, global_memory, inverted_select_inds

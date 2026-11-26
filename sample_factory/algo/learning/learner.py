@@ -575,7 +575,7 @@ class Learner(Configurable):
                     if getattr(self.cfg, 'core_memory', False):
                         core_done_or_invalid = torch.logical_or(mb.dones_cpu, ~valids.cpu()).float()
 
-                        head_output_seq, history_seqs, env_agent_buffer_rollout_infos, start_agent_mememory_states, start_global_memory_states, inverted_select_inds, cpu_lengths = build_srmt_inputs(
+                        head_output_seq, start_history_states, env_agent_buffer_rollout_infos, start_agent_mememory_states, start_global_memory_states, inverted_select_inds, cpu_lengths = build_srmt_inputs(
                             head_outputs, mb.history_seq, mb.env_agent_buffer_rollout_info,
                             core_done_or_invalid, mb.agent_memory, mb.global_memory, mem_recurrence, 
                             return_lengths=True)
@@ -586,11 +586,6 @@ class Learner(Configurable):
                                                                total_length=mem_recurrence
                                                                )
                         
-                        history_seqs, _ = torch.nn.utils.rnn.pad_packed_sequence(
-                                                               history_seqs, 
-                                                               batch_first=True, 
-                                                               padding_value=0.0, 
-                                                               total_length=mem_recurrence)
                         
                         env_agent_buffer_rollout_infos, _ = torch.nn.utils.rnn.pad_packed_sequence(
                                                                 env_agent_buffer_rollout_infos, 
@@ -624,23 +619,20 @@ class Learner(Configurable):
                         
                         if getattr(self.cfg, 'core_memory', False): # and self.cfg.mem_recurrence != -1:
                             
-                            head_outputs_elems = head_output_seq.split(1, dim=1)
-                            head_outputs_elems = [i.squeeze(1) for i in head_outputs_elems]
-                            history_seqs_elems = history_seqs.split(1, dim=1)
-                            history_seqs_elems = [i.squeeze(1) for i in history_seqs_elems]
-                            env_agent_buffer_rollout_info_elems = env_agent_buffer_rollout_infos.split(1, dim=1)
-                            env_agent_buffer_rollout_info_elems = [i.squeeze(1) for i in env_agent_buffer_rollout_info_elems]
+                            head_outputs_elems = [i.squeeze(1) for i in head_output_seq.split(1, dim=1)]
+                            env_agent_buffer_rollout_info_elems = [
+                                i.squeeze(1) for i in env_agent_buffer_rollout_infos.split(1, dim=1)
+                            ]
                             core_outputs_states = []
-                            state = start_agent_mememory_states
-                            global_state = start_global_memory_states
-                            state = state.detach()
+                            state = start_agent_mememory_states.detach()
                             state.requires_grad = True
-                            global_state = global_state.detach()
+                            global_state = start_global_memory_states.detach()
                             global_state.requires_grad = True
-                            global_state_indices = None
-                            for fwd_step, (ho, hi, 
+                            history_state = (
+                                start_history_states.detach() if start_history_states is not None else None
+                            )
+                            for fwd_step, (ho, 
                                            inf) in enumerate(zip(head_outputs_elems, 
-                                                  history_seqs_elems,
                                                   env_agent_buffer_rollout_info_elems
                                                   )):
                                 
@@ -649,7 +641,7 @@ class Learner(Configurable):
                                                         rnn_states=None,
                                                         agent_memory=state,
                                                         global_memory=global_state,
-                                                        history_seq=hi,
+                                                        history_seq=history_state,
                                                         action_seq=None,
                                                         env_agent_buffer_rollout_info=inf,
                                                         global_state_indices=global_state_indices,
@@ -658,25 +650,22 @@ class Learner(Configurable):
                                     state = add_out['agent_new_memory']
                                     global_state = add_out['new_global_memory']
                                 else:
-                                    print(f"no agent_new_memory in add_out")
-                                    assert False
-                                if 'global_state_indices' in add_out:
-                                    global_state_indices = add_out['global_state_indices']
-                                
+                                    raise RuntimeError("no agent_new_memory in add_out")
+
+                                if add_out.get('new_history_seq') is not None:
+                                    history_state = add_out['new_history_seq']
+
                                 core_outputs_states.append(core_out_elem)
                             core_outputs_states = torch.stack(core_outputs_states, dim=1).to(core_out_elem.device)
-                                
-                               
                             packed_core_outputs_states = torch.nn.utils.rnn.pack_padded_sequence(
                                 core_outputs_states,
                                 head_output_seq_lens,
                                 batch_first=True,
-                                enforce_sorted=False
+                                enforce_sorted=False,
                             )
-                            
-                            
-                            core_outputs = build_core_out_from_seq(packed_core_outputs_states,
-                                                                    inverted_select_inds)
+                            core_outputs = build_core_out_from_seq(
+                                packed_core_outputs_states, inverted_select_inds
+                            )
                             
 
                             
