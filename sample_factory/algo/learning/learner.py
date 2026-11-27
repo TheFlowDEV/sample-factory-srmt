@@ -644,7 +644,6 @@ class Learner(Configurable):
                                                         history_seq=history_state,
                                                         action_seq=None,
                                                         env_agent_buffer_rollout_info=inf,
-                                                        global_state_indices=global_state_indices,
                                                     )
                                 if 'agent_new_memory' in add_out:
                                     state = add_out['agent_new_memory']
